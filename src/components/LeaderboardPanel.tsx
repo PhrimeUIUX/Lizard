@@ -13,7 +13,7 @@ function rankBadge(rank: number) {
 }
 
 export function LeaderboardPanel({ leaderboard, onOpenTopHundred }: LeaderboardPanelProps) {
-  const topTen = leaderboard.slice(0, 10);
+  const topFive = leaderboard.slice(0, 5);
 
   return (
     <section className="leaderboard-panel compact">
@@ -23,11 +23,11 @@ export function LeaderboardPanel({ leaderboard, onOpenTopHundred }: LeaderboardP
       </div>
 
       <div className="rank-list-card">
-        {topTen.length === 0 ? (
+        {topFive.length === 0 ? (
           <p className="muted">No ranked lizards yet.</p>
         ) : (
           <ol className="rank-list-compact" start={1}>
-            {topTen.map((entry, index) => {
+            {topFive.map((entry, index) => {
               const rank = index + 1;
               return (
                 <li key={entry.user_id} className={`rank-row ${rank <= 3 ? `place-${rank}` : ''}`}>

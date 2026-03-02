@@ -204,7 +204,7 @@ input:focus-visible {
   position: absolute;
   top: 8px;
   left: 10px;
-  width: min(260px, calc(100vw - 24px));
+  width: min(220px, calc(100vw - 24px));
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -304,7 +304,7 @@ input:focus-visible {
   justify-items: center;
   align-items: center;
   gap: 14px;
-  padding-top: 42px;
+  padding-top: 58px;
   text-align: center;
 }
 
@@ -658,6 +658,52 @@ input:hover {
 
   .lizard-btn {
     width: min(48dvh, 460px);
+  }
+}
+
+@media (max-width: 640px) {
+  .top-lizard-wrap {
+    top: 6px;
+    left: 8px;
+    width: min(165px, calc(100vw - 16px));
+  }
+
+  .panel-head {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .panel-head h2 {
+    font-size: 0.78rem;
+  }
+
+  .brand-btn.small {
+    min-height: 24px;
+    padding: 3px 7px;
+    font-size: 0.7rem;
+  }
+
+  .rank-list-compact {
+    gap: 3px;
+  }
+
+  .rank-row {
+    font-size: 0.74rem;
+    gap: 6px;
+    padding: 1px 0;
+  }
+
+  .rank-badge {
+    min-width: 20px;
+    font-size: 0.72rem;
+  }
+
+  .name {
+    font-size: 0.72rem;
+  }
+
+  .press-wrap {
+    padding-top: 72px;
   }
 }
 
