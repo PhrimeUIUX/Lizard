@@ -306,6 +306,7 @@ input:focus-visible {
   gap: 14px;
   padding-top: 58px;
   text-align: center;
+  position: relative;
 }
 
 /* Keep big lizard button design as requested */
@@ -319,6 +320,7 @@ input:focus-visible {
   cursor: pointer;
   padding: 0;
   overflow: hidden;
+  position: relative;
   transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
 }
 
@@ -357,6 +359,39 @@ input:focus-visible {
   gap: 8px;
   justify-content: center;
   margin-top: 14px;
+}
+
+.tap-emoji-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.tap-emoji {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: clamp(1rem, 3vw, 1.6rem);
+  text-shadow: 0 2px 6px #0f2a1a40;
+  animation: tap-emoji-rise 900ms ease-out forwards;
+  will-change: transform, opacity;
+}
+
+@keyframes tap-emoji-rise {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -20%) scale(0.7);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -220%) scale(1.2);
+  }
 }
 
 .stat-chip {

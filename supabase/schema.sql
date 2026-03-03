@@ -1,3 +1,5 @@
+create schema if not exists extensions;
+
 create extension if not exists pgcrypto with schema extensions;
 create extension if not exists citext with schema extensions;
 
@@ -105,11 +107,33 @@ security definer
 set search_path = public
 as $$
 declare
+  v_res jsonb;
+begin
+  execute 'select public.press_lizard_batch($1, $2)'
+  into v_res
+  using p_identifier, 1;
+
+  return v_res;
+end;
+$$;
+
+create or replace function public.press_lizard_batch(p_identifier text, p_count int)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
   v_effective_identifier text;
-  v_hash text;
+  v_count int;
   v_public_total bigint;
   v_user_total bigint;
 begin
+  v_count := coalesce(p_count, 0);
+  if v_count < 1 or v_count > 50 then
+    return jsonb_build_object('ok', false, 'error', 'Invalid press batch size.');
+  end if;
+
   if auth.uid() is not null then
     v_effective_identifier := 'user:' || auth.uid()::text;
   else
@@ -122,28 +146,16 @@ begin
     v_effective_identifier := p_identifier;
   end if;
 
-  v_hash := encode(extensions.digest(v_effective_identifier, 'sha256'), 'hex');
-
-  insert into public.rate_limits (identifier_hash, last_pressed_at)
-  values (v_hash, clock_timestamp())
-  on conflict (identifier_hash)
-  do update set last_pressed_at = excluded.last_pressed_at
-  where public.rate_limits.last_pressed_at <= clock_timestamp() - interval '300 milliseconds';
-
-  if not found then
-    return jsonb_build_object('ok', false, 'error', 'Too fast. Wait 0.3s between presses.');
-  end if;
-
   update public.app_counters
-  set value = value + 1
+  set value = value + v_count
   where key = 'public_total'
   returning value into v_public_total;
 
   if auth.uid() is not null then
     insert into public.user_scores (user_id, presses)
-    values (auth.uid(), 1)
+    values (auth.uid(), v_count)
     on conflict (user_id)
-    do update set presses = public.user_scores.presses + 1
+    do update set presses = public.user_scores.presses + v_count
     returning presses into v_user_total;
   end if;
 
@@ -209,4 +221,5 @@ revoke insert, update, delete on public.profiles from anon, authenticated;
 grant usage on schema public to anon, authenticated;
 grant select on public.profiles, public.app_counters, public.user_scores to anon, authenticated;
 grant execute on function public.press_lizard(text) to anon, authenticated;
+grant execute on function public.press_lizard_batch(text, int) to anon, authenticated;
 grant execute on function public.get_leaderboard(int) to anon, authenticated;

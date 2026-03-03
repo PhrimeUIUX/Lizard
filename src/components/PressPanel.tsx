@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import { playLizardSfx } from '../lib/audio';
@@ -9,8 +9,8 @@ interface PressPanelProps {
   guestId: string;
   publicTotal: number;
   myScore: number;
-  onPublicTotalChange: (value: number) => void;
-  onMyScoreChange: (value: number) => void;
+  onPublicTotalChange: Dispatch<SetStateAction<number>>;
+  onMyScoreChange: Dispatch<SetStateAction<number>>;
   onStatusChange: (value: string) => void;
   onRefreshLeaderboard: () => Promise<void>;
   onSuccessfulPress: () => void;
@@ -18,6 +18,14 @@ interface PressPanelProps {
 
 const LIZARD_IMAGE_SRC = '/images/lizard-button.png';
 const LIZARD_SFX_SRC = '/sfx/lizard-press.mp3';
+const TAP_EMOJIS = ['🔥', '🦎', '⚡', '💥', '✨', '🌟', '🚀', '💚', '🎉'];
+
+interface TapEmoji {
+  id: number;
+  emoji: string;
+  x: number;
+  y: number;
+}
 
 export function PressPanel({
   session,
@@ -30,11 +38,16 @@ export function PressPanel({
   onRefreshLeaderboard,
   onSuccessfulPress
 }: PressPanelProps) {
-  const [loadingPress, setLoadingPress] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [imageMissing, setImageMissing] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const pressAudioRef = useRef<HTMLAudioElement | null>(null);
-  const lastPressRef = useRef(0);
+  const bufferRef = useRef<Record<string, number>>({});
+  const flushTimerRef = useRef<number | null>(null);
+  const isFlushingRef = useRef(false);
+  const lizardButtonRef = useRef<HTMLButtonElement | null>(null);
+  const emojiIdRef = useRef(0);
+  const [tapEmojis, setTapEmojis] = useState<TapEmoji[]>([]);
 
   const isAuthed = useMemo(() => Boolean(session?.user?.id), [session?.user?.id]);
 
@@ -51,57 +64,151 @@ export function PressPanel({
     });
   }
 
-  async function handlePress() {
-    if (loadingPress) {
+  function getIdentifier() {
+    return isAuthed ? `user:${session?.user.id}` : `guest:${guestId}`;
+  }
+
+  function scheduleFlush(delayMs = 1000) {
+    if (flushTimerRef.current) {
+      window.clearTimeout(flushTimerRef.current);
+    }
+    flushTimerRef.current = window.setTimeout(() => {
+      void flushBuffered();
+    }, delayMs);
+  }
+
+  function restoreBuffered(identifier: string, count: number) {
+    bufferRef.current[identifier] = (bufferRef.current[identifier] || 0) + count;
+  }
+
+  async function flushBuffered() {
+    if (isFlushingRef.current) {
+      return;
+    }
+    isFlushingRef.current = true;
+    setIsSyncing(true);
+
+    try {
+      while (true) {
+        const nextEntry = Object.entries(bufferRef.current)[0];
+        if (!nextEntry) {
+          break;
+        }
+
+        const [identifier, count] = nextEntry;
+        delete bufferRef.current[identifier];
+
+        let remaining = count;
+        while (remaining > 0) {
+          const chunk = Math.min(remaining, 50);
+          const { data, error } = await supabase.rpc('press_lizard_batch', {
+            p_identifier: identifier,
+            p_count: chunk
+          });
+
+          if (error) {
+            restoreBuffered(identifier, remaining);
+            onStatusChange(`Sync error: ${error.message}. Retrying...`);
+            scheduleFlush(1500);
+            remaining = 0;
+            break;
+          }
+
+          const pressData = data as PressResponse;
+          if (!pressData?.ok) {
+            restoreBuffered(identifier, remaining);
+            onStatusChange(pressData?.error || 'Sync error. Retrying...');
+            scheduleFlush(1500);
+            remaining = 0;
+            break;
+          }
+
+          onPublicTotalChange(Number(pressData.public_total || 0));
+          if (identifier.startsWith('user:')) {
+            onMyScoreChange(Number(pressData.user_total || 0));
+          }
+
+          remaining -= chunk;
+        }
+      }
+    } finally {
+      isFlushingRef.current = false;
+      setIsSyncing(false);
+      if (Object.keys(bufferRef.current).length > 0) {
+        scheduleFlush(1200);
+      } else {
+        onStatusChange('Synced.');
+        void onRefreshLeaderboard();
+      }
+    }
+  }
+
+  useEffect(() => {
+    function flushOnHidden() {
+      if (document.visibilityState === 'hidden') {
+        void flushBuffered();
+      }
+    }
+
+    document.addEventListener('visibilitychange', flushOnHidden);
+    window.addEventListener('beforeunload', flushOnHidden);
+
+    return () => {
+      document.removeEventListener('visibilitychange', flushOnHidden);
+      window.removeEventListener('beforeunload', flushOnHidden);
+      if (flushTimerRef.current) {
+        window.clearTimeout(flushTimerRef.current);
+      }
+      void flushBuffered();
+    };
+  }, []);
+
+  function spawnTapEmoji(clientX?: number, clientY?: number) {
+    const button = lizardButtonRef.current;
+    if (!button) {
       return;
     }
 
-    const now = Date.now();
-    if (now - lastPressRef.current < 300) {
-      onStatusChange('Too fast. Wait 0.3s between presses.');
-      return;
-    }
-    lastPressRef.current = now;
+    const rect = button.getBoundingClientRect();
+    const x = clientX ? clientX - rect.left : rect.width / 2;
+    const y = clientY ? clientY - rect.top : rect.height / 2;
+    const id = ++emojiIdRef.current;
+    const emoji = TAP_EMOJIS[Math.floor(Math.random() * TAP_EMOJIS.length)];
 
-    setLoadingPress(true);
+    setTapEmojis((prev) => [...prev, { id, emoji, x, y }]);
+    window.setTimeout(() => {
+      setTapEmojis((prev) => prev.filter((item) => item.id !== id));
+    }, 900);
+  }
 
-    const identifier = isAuthed ? `user:${session?.user.id}` : `guest:${guestId}`;
-    const { data, error } = await supabase.rpc('press_lizard', {
-      p_identifier: identifier
-    });
-
-    if (error) {
-      setLoadingPress(false);
-      onStatusChange(error.message.includes('0.3') ? error.message : `Press error: ${error.message}`);
-      return;
-    }
-
-    const pressData = data as PressResponse;
-    if (!pressData?.ok) {
-      setLoadingPress(false);
-      onStatusChange(pressData?.error || 'Too fast. Wait 0.3s.');
-      return;
-    }
-
+  function handlePress(clientX?: number, clientY?: number) {
     playPressAudio();
+    spawnTapEmoji(clientX, clientY);
+    const identifier = getIdentifier();
+    bufferRef.current[identifier] = (bufferRef.current[identifier] || 0) + 1;
 
-    onPublicTotalChange(Number(pressData.public_total || 0));
+    onPublicTotalChange((prev) => prev + 1);
     if (isAuthed) {
-      onMyScoreChange(Number(pressData.user_total || 0));
+      onMyScoreChange((prev) => prev + 1);
     }
-
-    onStatusChange('Lizard pressed. +1');
+    onStatusChange('Lizard pressed. +1 (pending sync)');
     onSuccessfulPress();
-    setLoadingPress(false);
-    await onRefreshLeaderboard();
+    scheduleFlush(1000);
   }
 
   return (
     <section className="press-wrap">
       <button
-        className={`lizard-btn ${loadingPress ? 'is-loading' : ''}`}
-        onClick={handlePress}
-        disabled={loadingPress}
+        ref={lizardButtonRef}
+        className={`lizard-btn ${isSyncing ? 'is-loading' : ''}`}
+        onPointerDown={(event) => {
+          handlePress(event.clientX, event.clientY);
+        }}
+        onClick={(event) => {
+          if (event.detail === 0) {
+            handlePress();
+          }
+        }}
         aria-label="Press lizard"
       >
         {imageMissing ? (
@@ -114,6 +221,20 @@ export function PressPanel({
             onError={() => setImageMissing(true)}
           />
         )}
+        <div className="tap-emoji-layer" aria-hidden="true">
+          {tapEmojis.map((item) => (
+            <span
+              key={item.id}
+              className="tap-emoji"
+              style={{
+                left: `${item.x}px`,
+                top: `${item.y}px`
+              }}
+            >
+              {item.emoji}
+            </span>
+          ))}
+        </div>
       </button>
 
       <div className="stats-row">
